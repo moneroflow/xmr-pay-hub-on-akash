@@ -1,0 +1,53 @@
+---
+version: "2.0"
+
+services:
+  nginx:
+    image: docker.io/moneroflow/xmr-pay-hub-on-akash:v1.9
+    expose:
+      - port: 8080
+        as: 8080
+        to:
+          - global: true
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    expose:
+      - port: 80
+        as: 80
+        to:
+          - global: true
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${TUNNEL_TOKEN}  # Set in Akash Console env vars
+    env:
+      - TUNNEL_TOKEN
+
+profiles:
+  compute:
+    nginx:
+      resources:
+        cpu:
+          units: 0.25
+        memory:
+          size: 512Mi
+        storage:
+          size: 512Mi
+  placement:
+    global:
+      pricing:
+        nginx:
+          denom: uakt
+          amount: 2000
+
+deployment:
+  nginx:
+    nginx:
+      profile: nginx
+      count: 1
+    cloudflared:
+      profile: nginx
+      count: 1
