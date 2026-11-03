@@ -268,7 +268,7 @@ function SweepStatusBanner() {
   // Match Browser Wallet badge style with color alternation when active
   // Show progress message when sweep is active
   const activeColor = isYellow ? 'warning' : 'success';
-  let bannerText = 'Cold Storage Sweep Complete';
+  let bannerText = 'Cold.S Sweep';
 
   if (merchant.activeSweepFlag) {
     bannerText = merchant.activeSweepMessage || 'Cold Storage Sweep Activated';
@@ -316,14 +316,13 @@ export default function DashboardLayout() {
           <DashboardSidebar />
           <SweepChecker enabled />
           <div className="flex-1 flex flex-col min-w-0">
-            <header className="h-14 flex items-center justify-between border-b border-border px-4 bg-background/80 backdrop-blur-sm sticky top-0 z-30">
-              <div className="flex items-center gap-3">
+            <header className="min-h-14 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border px-4 py-1.5 bg-background/80 backdrop-blur-sm sticky top-0 z-30">
+              <div className="flex flex-wrap items-center gap-3">
                 <CustomSidebarTrigger />
                 <SweepStatusBanner />
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3">
                 <SeedBackupWarning />
-                <ManagedBadge />
                 <PrivacyBanner />
               </div>
             </header>

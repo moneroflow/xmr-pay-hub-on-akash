@@ -8,7 +8,7 @@ export function PrivacyBanner() {
   return (
     <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-success/10 border border-success/20 text-success text-xs font-medium">
       <ShieldCheck className="w-4 h-4" />
-      <span>Privacy Mode: All data stored in browser</span>
+      <span>Privacy mode</span>
     </div>
   );
 }
