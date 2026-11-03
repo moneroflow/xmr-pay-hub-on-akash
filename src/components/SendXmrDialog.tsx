@@ -188,6 +188,11 @@ export function SendXmrDialog({ open, onOpenChange, autoStartScanner = false }: 
   const timeoutMin = merchant.adminAuthTimeoutMin ?? DEFAULT_AUTH_TIMEOUT_MIN;
   const adminAuthed = isAdminAuthed(merchant.adminPasswordHash, timeoutMin);
   const needsAuth = hasMultipleUsers && !!merchant.adminPasswordHash && !adminAuthed;
+  // Balance is always shown but masked to staff unless the admin session is
+  // unlocked. Clicking the masked balance prompts for the admin password
+  // (honouring the same session-token timeout as sends/scans).
+  const balanceVisible = !merchant.adminPasswordHash || adminAuthed;
+  const balanceCanReveal = !!merchant.adminPasswordHash && !adminAuthed;
 
   // Open the dialog directly on the form — auth (if needed) is deferred until
   // the final send step, so casual browsing never prompts for a password.
@@ -445,55 +450,88 @@ export function SendXmrDialog({ open, onOpenChange, autoStartScanner = false }: 
               </button>
             </div>
 
-            {/* Wallet Balance (shown when admin is authed or single-user) */}
-            {(!hasMultipleUsers || adminAuthed) && (
-              <div className="rounded-lg bg-muted/20 border border-border p-3 flex items-center gap-3">
-                <Wallet className="w-5 h-5 text-primary shrink-0" />
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                      {hasRealBalance ? 'On-Chain Balance' : balanceLoading && !realBalance ? 'Checking Balance' : 'Wallet Balance'}
-                    </p>
-                    {balanceLoading && (
-                      <Loader2 className="w-3 h-3 animate-spin text-primary" />
-                    )}
-                    {hasRealBalance && !balanceLoading && (
-                      <Badge variant="outline" className="text-[8px] px-1 py-0 border-primary/30 text-primary">LIVE</Badge>
-                    )}
-                    {cacheSyncMode === 'full' && hasRealBalance && !balanceLoading && (
-                      <Badge variant="outline" className="text-[8px] px-1 py-0 border-primary/40 text-primary">FULL</Badge>
-                    )}
-                    {hasRealBalance && balanceLoading && (
-                      <Badge variant="outline" className="text-[8px] px-1 py-0 border-muted-foreground/30 text-muted-foreground">CACHED</Badge>
-                    )}
-                    {balanceError && !hasRealBalance && (
-                      <Badge variant="outline" className="text-[8px] px-1 py-0 border-warning/30 text-warning">ESTIMATE</Badge>
-                    )}
-                  </div>
-                  {/* Always show balance if we have any value */}
-                  {(realBalance !== null || realUnlockedBalance !== null || !balanceLoading) && (
-                    <p className="text-sm font-bold text-foreground font-mono">{formatXMR(displayBalance)}</p>
+            {/* Wallet Balance — always shown, but masked to staff until the
+                admin session is unlocked (session-token rules). Clicking the
+                masked balance prompts for the admin password. */}
+            <div
+              className={`rounded-lg bg-muted/20 border border-border p-3 flex items-center gap-3 ${balanceCanReveal ? 'cursor-pointer hover:bg-muted/30' : ''}`}
+              onClick={balanceCanReveal ? () => setAuthPrompt(true) : undefined}
+            >
+              <Wallet className="w-5 h-5 text-primary shrink-0" />
+              <div className="flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    {hasRealBalance ? 'On-Chain Balance' : balanceLoading && !realBalance ? 'Checking Balance' : 'Wallet Balance'}
+                  </p>
+                  {balanceLoading && (
+                    <Loader2 className="w-3 h-3 animate-spin text-primary" />
                   )}
-                  {/* Show sync message when loading with no cached data */}
-                  {balanceLoading && realBalance === null && realUnlockedBalance === null && (
-                    <p className="text-xs text-muted-foreground mt-0.5">{balanceSyncMsg || 'Connecting...'}</p>
+                  {balanceCanReveal && (
+                    <Badge variant="outline" className="text-[8px] px-1 py-0 border-warning/30 text-warning">ADMIN</Badge>
                   )}
-                  {/* Show updating message when refreshing cached data */}
-                  {balanceLoading && (realBalance !== null || realUnlockedBalance !== null) && (
-                    <p className="text-[9px] text-muted-foreground">{balanceSyncMsg || 'Updating...'}</p>
+                  {balanceVisible && hasRealBalance && !balanceLoading && (
+                    <Badge variant="outline" className="text-[8px] px-1 py-0 border-primary/30 text-primary">LIVE</Badge>
                   )}
-                  {/* Timestamp */}
-                  {cachedTimestamp && !balanceLoading && (
-                    <p className="text-[9px] text-muted-foreground mt-0.5">Last checked: {getRelativeTime(cachedTimestamp)}</p>
+                  {balanceVisible && cacheSyncMode === 'full' && hasRealBalance && !balanceLoading && (
+                    <Badge variant="outline" className="text-[8px] px-1 py-0 border-primary/40 text-primary">FULL</Badge>
+                  )}
+                  {balanceVisible && hasRealBalance && balanceLoading && (
+                    <Badge variant="outline" className="text-[8px] px-1 py-0 border-muted-foreground/30 text-muted-foreground">CACHED</Badge>
+                  )}
+                  {balanceVisible && balanceError && !hasRealBalance && (
+                    <Badge variant="outline" className="text-[8px] px-1 py-0 border-warning/30 text-warning">ESTIMATE</Badge>
                   )}
                 </div>
-                {displayBalanceFiat !== null && (realBalance !== null || realUnlockedBalance !== null || !balanceLoading) && (
-                  <div className="text-right">
-                    <p className="text-sm font-medium text-muted-foreground">
-                      {sym}{displayBalanceFiat.toFixed(2)} {cur}
-                    </p>
-                  </div>
+                {/* Always show balance if we have any value */}
+                {(realBalance !== null || realUnlockedBalance !== null || !balanceLoading) && (
+                  <p className="text-sm font-bold text-foreground font-mono">{balanceVisible ? formatXMR(displayBalance) : '••••••••••'}</p>
                 )}
+                {/* Show sync message when loading with no cached data */}
+                {balanceLoading && realBalance === null && realUnlockedBalance === null && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{balanceSyncMsg || 'Connecting...'}</p>
+                )}
+                {/* Show updating message when refreshing cached data */}
+                {balanceLoading && (realBalance !== null || realUnlockedBalance !== null) && (
+                  <p className="text-[9px] text-muted-foreground">{balanceSyncMsg || 'Updating...'}</p>
+                )}
+                {/* Timestamp */}
+                {cachedTimestamp && !balanceLoading && (
+                  <p className="text-[9px] text-muted-foreground mt-0.5">Last checked: {getRelativeTime(cachedTimestamp)}</p>
+                )}
+              </div>
+              {displayBalanceFiat !== null && (realBalance !== null || realUnlockedBalance !== null || !balanceLoading) && (
+                <div className="text-right">
+                  <p className="text-sm font-medium text-muted-foreground">
+                    {balanceVisible ? `${sym}${displayBalanceFiat.toFixed(2)} ${cur}` : `${sym}••••• ${cur}`}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Inline admin prompt to reveal the masked balance (form step) */}
+            {balanceCanReveal && authPrompt && (
+              <div className="rounded-lg bg-warning/10 border border-warning/30 p-3 space-y-2">
+                <p className="text-xs text-warning flex items-center gap-2">
+                  <Lock className="w-4 h-4 shrink-0" />
+                  Enter your admin password to view the balance.
+                </p>
+                <Input
+                  type="password"
+                  value={adminPass}
+                  onChange={e => setAdminPass(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && handleAdminAuth()}
+                  placeholder="Admin password"
+                  className="bg-background border-border"
+                  autoFocus
+                />
+                <div className="flex gap-2">
+                  <Button variant="outline" onClick={() => { setAuthPrompt(false); setAdminPass(''); }} className="flex-1 border-border">
+                    Cancel
+                  </Button>
+                  <Button onClick={handleAdminAuth} className="flex-1 bg-gradient-orange hover:opacity-90">
+                    <Lock className="w-4 h-4 mr-2" /> Unlock
+                  </Button>
+                </div>
               </div>
             )}
 
