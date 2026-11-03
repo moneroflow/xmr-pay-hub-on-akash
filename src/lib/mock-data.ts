@@ -184,6 +184,11 @@ export interface Merchant {
   preferredFeeTier: 'normal' | 'fast' | 'urgent'; // default fee tier to display
   // Send mode
   sendMode: 'proxy' | 'wasm'; // Daemon Proxy (default) or Full WASM
+  // Autonomous node switching (Cake-Wallet-style background health monitor)
+  autoNodeSwitchEnabled: boolean; // periodic health probe + auto rotate
+  autoNodeSwitchIntervalMin: number; // minutes between health probes (default 0.5)
+  // Admin auth session timeout (minutes) — how long a verified admin password stays valid
+  adminAuthTimeoutMin: number;
   // Treasury / Creator server (creatorServerFqdn removed — hardcoded as CREATOR_SERVER_FQDN)
   lifetimeProCodes: { code: string; createdAt: string; usedBy?: string }[];
   devBypassReferrals: boolean;
@@ -193,9 +198,6 @@ export interface Merchant {
   lastSweepDate: string | null; // Timestamp of last successful sweep
   activeSweepFlag: boolean; // Show sweeping banner when true
   activeSweepMessage: string; // Current sweep step message to display
-  // Autonomous node switching (Cake-Wallet-style background health monitor)
-  autoNodeSwitchEnabled: boolean; // periodic health probe + auto rotate
-  autoNodeSwitchIntervalMin: number; // minutes between health probes (default 0.5)
 }
 
 // Pro subscription constants
@@ -368,8 +370,6 @@ export const defaultMerchant: Merchant = {
   nodeStatus: 'offline',
   nodeHeight: 0,
   nodeLatencyMs: 0,
-  autoNodeSwitchEnabled: true,
-  autoNodeSwitchIntervalMin: 0.5,
   posQuickButtons: [],
   posCategories: ['Food', 'Drinks', 'Services', 'Products'],
   fqdn: '',
@@ -397,6 +397,9 @@ export const defaultMerchant: Merchant = {
   webhookPaymentUrl: '',
   preferredFeeTier: 'normal',
   sendMode: 'proxy',
+  autoNodeSwitchEnabled: true,
+  autoNodeSwitchIntervalMin: 0.5,
+  adminAuthTimeoutMin: 30,
   lifetimeProCodes: [],
   devBypassReferrals: false,
   cumulativeReceivedXmr: 0,

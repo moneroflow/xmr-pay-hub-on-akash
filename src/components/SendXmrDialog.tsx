@@ -15,6 +15,7 @@ import { Progress } from '@/components/ui/progress';
 import { verifyTxOutputs, getMempoolTxHashes, getTxInfo } from '@/lib/block-explorer';
 import { motion } from 'framer-motion';
 import { sendViaDaemonProxy, sendViaWasmWallet, checkWalletBalance, getCachedBalance, clearBalanceCache, type SyncProgress, type SendMode, type SyncDepth, FAST_SYNC_BLOCK_WINDOW } from '@/lib/wallet-send';
+import { isAdminAuthed, markAdminAuthed, clearAdminAuth, DEFAULT_AUTH_TIMEOUT_MIN } from '@/lib/auth-session';
 import jsQR from 'jsqr';
 
 // Fee tiers for sending
@@ -27,9 +28,10 @@ const SEND_FEE_TIERS = [
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  autoStartScanner?: boolean;
 }
 
-export function SendXmrDialog({ open, onOpenChange }: Props) {
+export function SendXmrDialog({ open, onOpenChange, autoStartScanner = false }: Props) {
   const merchant = useStore(s => s.merchant);
   const invoices = useStore(s => s.invoices);
   const { rates } = useRates();
@@ -45,9 +47,11 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
   const [note, setNote] = useState('');
   const [sending, setSending] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
-  const [step, setStep] = useState<'auth' | 'form' | 'confirm' | 'syncing' | 'tracking' | 'sent'>('form');
+  const [step, setStep] = useState<'form' | 'confirm' | 'syncing' | 'tracking' | 'sent' | 'auth'>('form');
   const [adminPass, setAdminPass] = useState('');
-  const [adminAuthed, setAdminAuthed] = useState(false);
+  const [authPrompt, setAuthPrompt] = useState(false);
+  // When true, a send is waiting for the admin password to be re-entered.
+  const pendingSendRef = useRef(false);
   const [sentTxHash, setSentTxHash] = useState('');
   const [sentFee, setSentFee] = useState(0);
   const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null);
@@ -80,6 +84,14 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
 
   const fiatEquivalent = xmrPrice ? parsedAmount * xmrPrice : null;
   const feeInFiat = xmrPrice ? selectedFee.feeXmr * xmrPrice : null;
+
+  // If opened in "scan" mode, auto-enable the camera scanner.
+  useEffect(() => {
+    if (open && autoStartScanner) {
+      setShowScanner(true);
+      setStep('form');
+    }
+  }, [open, autoStartScanner]);
 
   // Fallback invoice-based balance (used only when real balance unavailable)
   const paidInvoices = invoices.filter(i => i.status === 'paid' && i.type !== 'sent' && !i.simulated);
@@ -172,15 +184,19 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
     // No cleanup — keep cached values across open/close cycles
   }, [open, runBalanceSync]);
 
-  // Determine if admin auth is required: only when multiple users exist
-  const needsAuth = hasMultipleUsers && !adminAuthed;
+  // Determine if admin auth is required: only when multiple users exist and a password is set
+  const timeoutMin = merchant.adminAuthTimeoutMin ?? DEFAULT_AUTH_TIMEOUT_MIN;
+  const adminAuthed = isAdminAuthed(merchant.adminPasswordHash, timeoutMin);
+  const needsAuth = hasMultipleUsers && !!merchant.adminPasswordHash && !adminAuthed;
 
-  // Set initial step based on auth requirement
+  // Open the dialog directly on the form — auth (if needed) is deferred until
+  // the final send step, so casual browsing never prompts for a password.
   useEffect(() => {
     if (open) {
-      setStep(needsAuth ? 'auth' : 'form');
+      setStep('form');
+      setAuthPrompt(false);
     }
-  }, [open, needsAuth]);
+  }, [open]);
 
   // Sync XMR ↔ fiat amounts
   const handleXmrChange = (val: string) => {
@@ -218,20 +234,37 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
     return 'h_' + Math.abs(hash).toString(36);
   };
 
-  // Admin password check
+  // Admin password check — on success, stamp the session token so we don't
+  // re-prompt until the timeout expires.
   const handleAdminAuth = () => {
     if (!merchant.adminPasswordHash) {
-      setAdminAuthed(true);
-      setStep('form');
-      return;
-    }
-    if (hashPassword(adminPass) === merchant.adminPasswordHash) {
-      setAdminAuthed(true);
-      setStep('form');
+      markAdminAuthed('');
+      setAuthPrompt(false);
+    } else if (hashPassword(adminPass) === merchant.adminPasswordHash) {
+      markAdminAuthed(merchant.adminPasswordHash);
       setAdminPass('');
+      setAuthPrompt(false);
+      toast.success('Unlocked · valid for this session');
     } else {
       toast.error('Incorrect admin password');
+      return;
     }
+    // If we got here because the user was mid-send, continue the transaction.
+    if (pendingSendRef.current) {
+      pendingSendRef.current = false;
+      handleSend();
+    }
+  };
+
+  // Final confirm step: only prompt for the admin password (when one is set for
+  // multi-user setups) at the very last moment — just before tokens are sent.
+  const handleConfirmSend = () => {
+    if (needsAuth) {
+      pendingSendRef.current = true;
+      setAuthPrompt(true);
+      return;
+    }
+    handleSend();
   };
 
   // Parse monero: URI from QR scan
@@ -338,9 +371,10 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
     setSentFee(0);
     setSyncProgress(null);
     setSendError('');
-    setStep(needsAuth ? 'auth' : 'form');
+    setStep('form');
     setAdminPass('');
-    setAdminAuthed(false);
+    setAuthPrompt(false);
+    pendingSendRef.current = false;
     setShowScanner(false);
   };
 
@@ -353,34 +387,6 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
             Send XMR
           </DialogTitle>
         </DialogHeader>
-
-        {/* ── Admin Auth Gate ── */}
-        {step === 'auth' && (
-          <div className="space-y-4 py-2">
-            <div className="rounded-lg bg-warning/10 border border-warning/20 p-3">
-              <p className="text-xs text-warning flex items-center gap-2">
-                <Lock className="w-4 h-4 shrink-0" />
-                Admin authentication required to send XMR when multiple users are active.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-foreground">Admin Password</Label>
-              <Input
-                type="password"
-                value={adminPass}
-                onChange={e => setAdminPass(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleAdminAuth()}
-                placeholder="Enter admin password"
-                className="bg-background border-border"
-                autoFocus
-              />
-            </div>
-            <Button onClick={handleAdminAuth} className="w-full bg-gradient-orange hover:opacity-90">
-              <Lock className="w-4 h-4 mr-2" />
-              Authenticate
-            </Button>
-          </div>
-        )}
 
         {/* ── Send Form ── */}
         {step === 'form' && (
@@ -689,28 +695,54 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
                   <p className="text-xs text-foreground">{note}</p>
                 </div>
               )}
-            </div>
+              </div>
 
-            <div className="p-2.5 rounded-lg bg-primary/5 border border-primary/20">
-              <p className="text-[10px] text-muted-foreground">
-                <strong className="text-foreground">Mode:</strong> {merchant.sendMode === 'wasm' ? 'Full WASM Wallet' : 'Daemon Proxy'} · 
-                <strong className="text-foreground ml-1">Node:</strong> {effectiveNodeUrl}
-              </p>
-            </div>
+              {authPrompt && (
+                <div className="rounded-lg bg-warning/10 border border-warning/30 p-3 space-y-2">
+                  <p className="text-xs text-warning flex items-center gap-2">
+                    <Lock className="w-4 h-4 shrink-0" />
+                    Enter your admin password to authorise sending {formatXMR(parsedAmount)} XMR.
+                  </p>
+                  <Input
+                    type="password"
+                    value={adminPass}
+                    onChange={e => setAdminPass(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handleAdminAuth()}
+                    placeholder="Admin password"
+                    className="bg-background border-border"
+                    autoFocus
+                  />
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={() => { setAuthPrompt(false); pendingSendRef.current = false; }} className="flex-1 border-border">
+                      Cancel
+                    </Button>
+                    <Button onClick={handleAdminAuth} className="flex-1 bg-gradient-orange hover:opacity-90">
+                      <Lock className="w-4 h-4 mr-2" /> Authorise & Send
+                    </Button>
+                  </div>
+                </div>
+              )}
 
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => { setStep('form'); setSendError(''); }} className="flex-1 border-border">
-                Back
-              </Button>
-              <Button
-                onClick={handleSend}
-                disabled={sending}
-                className="flex-1 bg-gradient-orange hover:opacity-90"
-              >
-                {sending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
-                {sending ? 'Sending...' : 'Confirm & Send'}
-              </Button>
-            </div>
+              <div className="p-2.5 rounded-lg bg-primary/5 border border-primary/20">
+                <p className="text-[10px] text-muted-foreground">
+                  <strong className="text-foreground">Mode:</strong> {merchant.sendMode === 'wasm' ? 'Full WASM Wallet' : 'Daemon Proxy'} · 
+                  <strong className="text-foreground ml-1">Node:</strong> {effectiveNodeUrl}
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => { setStep('form'); setSendError(''); }} className="flex-1 border-border">
+                  Back
+                </Button>
+                <Button
+                  onClick={handleConfirmSend}
+                  disabled={sending || authPrompt}
+                  className="flex-1 bg-gradient-orange hover:opacity-90"
+                >
+                  {sending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+                  {sending ? 'Sending...' : 'Confirm & Send'}
+                </Button>
+              </div>
           </div>
         )}
 

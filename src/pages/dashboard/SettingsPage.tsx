@@ -640,6 +640,37 @@ export default function SettingsPage() {
                 )}
               </div>
 
+              {/* Admin Session Auth Timeout — how long a verified password stays valid */}
+              <div className="p-4 rounded-lg bg-muted/30 border border-border space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Lock className="w-4 h-4 text-primary" />
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Admin Session Timeout</p>
+                      <p className="text-[10px] text-muted-foreground">Once the admin password is entered to authorise a send/scan, it stays unlocked for this long before asking again.</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="space-y-2 pt-1 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-foreground text-xs">Session Lifetime</Label>
+                    <span className="text-sm font-mono text-primary">
+                      {merchant.adminAuthTimeoutMin < 1 ? '30s' : `${merchant.adminAuthTimeoutMin} min`}
+                    </span>
+                  </div>
+                  <Slider
+                    value={[merchant.adminAuthTimeoutMin]}
+                    onValueChange={v => updateMerchant({ adminAuthTimeoutMin: v[0] })}
+                    min={0.5}
+                    max={120}
+                    step={0.5}
+                    className="py-2"
+                  />
+                  <p className="text-[10px] text-muted-foreground">Lower = more secure (re-prompt sooner); higher = fewer re-prompts. Set to a short value like 5–30 min for a POS terminal.</p>
+                  <p className="text-[10px] text-muted-foreground">You can add or change the admin password under Wallet & Node → “Set/Change Admin Password”.</p>
+                </div>
+              </div>
+
               <div className="p-3 rounded-lg bg-warning/10 border border-warning/20">
                 <p className="text-[11px] text-warning leading-relaxed">
                   ⚠️ <strong>Keep this tab open</strong> to detect incoming payments. For 24/7 operation, switch to Managed mode.
