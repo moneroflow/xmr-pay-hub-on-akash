@@ -18,16 +18,15 @@ import {
 } from '@/components/ui/sidebar';
 import { LayoutDashboard, FileText, Clock, Settings, LogOut, RefreshCw, MonitorSmartphone, BarChart3, Link2, Plug, Globe, Paintbrush, Landmark, Gift, Server, Shield, HardDrive, Users, Sun, Moon, Zap, Wallet, BookOpen, ExternalLink } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
+import { useNodeSwitchingMonitor } from '@/hooks/use-node-switching';
 import { useStore } from '@/lib/store';
 import { startReferralSync } from '@/lib/referral-sync';
 
+// MoneroFlow uses ONLY the Monero brand palette (dark monero charcoal + monero orange).
+// Alternate off-brand schemes (rose/lavender/mint/peach) are intentionally omitted.
 const THEMES = [
   { id: 'dark', label: 'Dark', swatch: '24 100% 50%' },
   { id: 'theme-light', label: 'Light', swatch: '0 0% 92%' },
-  { id: 'theme-rose', label: 'Rose', swatch: '350 70% 55%' },
-  { id: 'theme-lavender', label: 'Lavender', swatch: '260 60% 55%' },
-  { id: 'theme-mint', label: 'Mint', swatch: '170 60% 40%' },
-  { id: 'theme-peach', label: 'Peach', swatch: '25 85% 55%' },
 ] as const;
 
 function ThemeToggle() {
@@ -291,6 +290,8 @@ export default function DashboardLayout() {
   // Use ref to keep stable reference to store getter
   // Prevents multiple sync instances on re-renders
   const syncStartedRef = useRef(false);
+  // Cake-Wallet-style background node health monitor (auto-rotate stale/offline nodes)
+  useNodeSwitchingMonitor();
   
   // Start referral sync only ONCE on mount (singleton - idempotent)
   useEffect(() => {

@@ -9,12 +9,13 @@ import { useStore } from '@/lib/store';
 import { useRates } from '@/hooks/use-rates';
 import { getXmrPrice } from '@/lib/currency-service';
 import { formatXMR, formatFiat } from '@/lib/mock-data';
-import { Send, Zap, Clock, Camera, Loader2, AlertTriangle, Check, Lock, X, Wallet, ExternalLink, Radio, Shield } from 'lucide-react';
+import { Send, Zap, Clock, Camera, Loader2, AlertTriangle, Check, Lock, X, Wallet, ExternalLink, Radio, Shield, RefreshCw, History } from 'lucide-react';
 import { toast } from 'sonner';
 import { Progress } from '@/components/ui/progress';
 import { verifyTxOutputs, getMempoolTxHashes, getTxInfo } from '@/lib/block-explorer';
 import { motion } from 'framer-motion';
-import { sendViaDaemonProxy, sendViaWasmWallet, checkWalletBalance, getCachedBalance, clearBalanceCache, type SyncProgress, type SendMode } from '@/lib/wallet-send';
+import { sendViaDaemonProxy, sendViaWasmWallet, checkWalletBalance, getCachedBalance, clearBalanceCache, type SyncProgress, type SendMode, type SyncDepth, FAST_SYNC_BLOCK_WINDOW } from '@/lib/wallet-send';
+import jsQR from 'jsqr';
 
 // Fee tiers for sending
 const SEND_FEE_TIERS = [
@@ -66,6 +67,11 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
     const cached = getCachedBalance();
     return cached ? cached.timestamp : null;
   });
+  // Sync-depth controls: which one is running, live %, and whether the cached
+  // balance is backed by a FULL (complete-history) scan.
+  const [activeSyncDepth, setActiveSyncDepth] = useState<SyncDepth | null>(null);
+  const [syncPercent, setSyncPercent] = useState(0);
+  const [cacheSyncMode, setCacheSyncMode] = useState<SyncDepth | null>(() => getCachedBalance()?.syncMode ?? null);
   const xmrPrice = rates ? getXmrPrice(cur, rates) : null;
   const selectedFee = SEND_FEE_TIERS.find(t => t.id === feeTier) || SEND_FEE_TIERS[0];
   const parsedAmount = parseFloat(amountXmr) || 0;
@@ -106,7 +112,48 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
     return () => clearInterval(iv);
   }, [cachedTimestamp]);
 
-  // Load cached balance instantly + fetch real balance when dialog opens
+  // Run a wallet balance sync at the given depth. FAST scans recent blocks only;
+  // FULL rescans the entire chain history. Updates state + cache on completion.
+  const runBalanceSync = useCallback(async (depth: SyncDepth) => {
+    if (!merchant.viewOnlySeedPhrase) return;
+    setBalanceLoading(true);
+    setBalanceError(false);
+    setBalanceSyncMsg('');
+    setActiveSyncDepth(depth);
+    setSyncPercent(0);
+
+    try {
+      await checkWalletBalance(
+        merchant.viewOnlySeedPhrase,
+        effectiveNodeUrl,
+        merchant.viewOnlyAddress,
+        merchant.viewOnlyViewKey,
+        (p) => { setBalanceSyncMsg(p.message); setSyncPercent(p.percent); },
+        { depth },
+      );
+      setActiveSyncDepth(null);
+      setCacheSyncMode(getCachedBalance()?.syncMode ?? null);
+      const cache = getCachedBalance();
+      if (cache) {
+        setRealBalance(cache.balance);
+        setRealUnlockedBalance(cache.unlockedBalance);
+        setCachedTimestamp(cache.timestamp);
+      }
+      setBalanceLoading(false);
+      setBalanceSyncMsg('');
+      if (depth === 'full') {
+        toast.success('Full sync complete — scanned the entire chain history.');
+      }
+    } catch {
+      setBalanceError(true);
+      setBalanceLoading(false);
+      setBalanceSyncMsg('');
+    } finally {
+      setActiveSyncDepth(null);
+    }
+  }, [merchant.viewOnlySeedPhrase, merchant.viewOnlyAddress, merchant.viewOnlyViewKey, effectiveNodeUrl]);
+
+  // Load cached balance instantly + fetch real balance (FAST) when dialog opens
   useEffect(() => {
     if (!open) return;
 
@@ -116,37 +163,14 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
       setRealBalance(cached.balance);
       setRealUnlockedBalance(cached.unlockedBalance);
       setCachedTimestamp(cached.timestamp);
+      setCacheSyncMode(cached.syncMode ?? null);
     }
 
-    // 2. Start real balance check if seed available
-    if (merchant.viewOnlySeedPhrase) {
-      setBalanceLoading(true);
-      setBalanceError(false);
-      setBalanceSyncMsg('');
-
-      checkWalletBalance(
-        merchant.viewOnlySeedPhrase,
-        effectiveNodeUrl,
-        merchant.viewOnlyAddress,
-        merchant.viewOnlyViewKey,
-        (p) => setBalanceSyncMsg(p.message),
-      )
-        .then(({ balance, unlockedBalance }) => {
-          setRealBalance(balance);
-          setRealUnlockedBalance(unlockedBalance);
-          setCachedTimestamp(Date.now());
-          setBalanceLoading(false);
-          setBalanceSyncMsg('');
-        })
-        .catch(() => {
-          setBalanceError(true);
-          setBalanceLoading(false);
-          setBalanceSyncMsg('');
-        });
-    }
+    // 2. Kick off a quick FAST balance check if seed available
+    runBalanceSync('fast');
 
     // No cleanup — keep cached values across open/close cycles
-  }, [open, merchant.viewOnlySeedPhrase, effectiveNodeUrl]);
+  }, [open, runBalanceSync]);
 
   // Determine if admin auth is required: only when multiple users exist
   const needsAuth = hasMultipleUsers && !adminAuthed;
@@ -361,6 +385,60 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
         {/* ── Send Form ── */}
         {step === 'form' && (
           <div className="space-y-4">
+            {/* Sync depth: FAST (recent blocks) vs FULL (entire chain history) */}
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => runBalanceSync('fast')}
+                disabled={!!activeSyncDepth}
+                className={`p-2.5 rounded-lg border text-center transition-all ${
+                  activeSyncDepth === 'fast'
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : cacheSyncMode === 'fast'
+                      ? 'border-primary/40 bg-primary/5 text-foreground hover:border-primary/70'
+                      : 'border-border bg-card text-muted-foreground hover:border-border/80'
+                }`}
+              >
+                <div className="flex items-center justify-center gap-1 mb-0.5">
+                  {activeSyncDepth === 'fast' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                  ) : (
+                    <Zap className="w-3.5 h-3.5 text-primary" />
+                  )}
+                  <span className="text-xs font-medium">Sync FAST</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Recent {FAST_SYNC_BLOCK_WINDOW.toLocaleString()} blocks (~32h)</p>
+                {activeSyncDepth === 'fast' && (
+                  <p className="text-[10px] font-mono text-primary mt-0.5">{syncPercent}%</p>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => runBalanceSync('full')}
+                disabled={!!activeSyncDepth}
+                className={`p-2.5 rounded-lg border text-center transition-all ${
+                  activeSyncDepth === 'full'
+                    ? 'border-primary bg-primary/10 text-foreground'
+                    : cacheSyncMode === 'full'
+                      ? 'border-primary/40 bg-primary/5 text-foreground hover:border-primary/70'
+                      : 'border-border bg-card text-muted-foreground hover:border-border/80'
+                }`}
+              >
+                <div className="flex items-center justify-center gap-1 mb-0.5">
+                  {activeSyncDepth === 'full' ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5 text-primary" />
+                  )}
+                  <span className="text-xs font-medium">Sync FULL</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Entire chain history (slow)</p>
+                {activeSyncDepth === 'full' && (
+                  <p className="text-[10px] font-mono text-primary mt-0.5">{syncPercent}%</p>
+                )}
+              </button>
+            </div>
+
             {/* Wallet Balance (shown when admin is authed or single-user) */}
             {(!hasMultipleUsers || adminAuthed) && (
               <div className="rounded-lg bg-muted/20 border border-border p-3 flex items-center gap-3">
@@ -375,6 +453,9 @@ export function SendXmrDialog({ open, onOpenChange }: Props) {
                     )}
                     {hasRealBalance && !balanceLoading && (
                       <Badge variant="outline" className="text-[8px] px-1 py-0 border-primary/30 text-primary">LIVE</Badge>
+                    )}
+                    {cacheSyncMode === 'full' && hasRealBalance && !balanceLoading && (
+                      <Badge variant="outline" className="text-[8px] px-1 py-0 border-primary/40 text-primary">FULL</Badge>
                     )}
                     {hasRealBalance && balanceLoading && (
                       <Badge variant="outline" className="text-[8px] px-1 py-0 border-muted-foreground/30 text-muted-foreground">CACHED</Badge>
@@ -943,29 +1024,35 @@ function LiveQrScanner({ onScan, onClose }: { onScan: (data: string) => void; on
           await videoRef.current.play();
         }
 
-        // Check for BarcodeDetector support
-        if (!('BarcodeDetector' in window)) {
-          setError('QR scanning not supported in this browser. Please paste the address manually.');
-          return;
-        }
+        // Decode QR codes with jsQR (pure JS, works on every platform —
+        // unlike the BarcodeDetector API which is unavailable in Capacitor's
+        // Android/iOS WebView). Draws each video frame to an offscreen canvas.
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-        const detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
-
-        // Continuous scanning loop
         const scan = async () => {
-          if (cancelled || !videoRef.current) return;
-          try {
-            const results = await detector.detect(videoRef.current);
-            if (results.length > 0) {
-              onScan(results[0].rawValue);
-              return; // Stop scanning after successful detection
-            }
-          } catch { /* ignore detection errors, keep scanning */ }
+          if (cancelled || !videoRef.current || !ctx) return;
+          const vid = videoRef.current;
+          if (vid.readyState >= vid.HAVE_CURRENT_DATA && vid.videoWidth > 0) {
+            canvas.width = vid.videoWidth;
+            canvas.height = vid.videoHeight;
+            ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+            try {
+              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: 'dontInvert',
+              });
+              if (code && code.data) {
+                onScan(code.data);
+                return; // Stop scanning after successful detection
+              }
+            } catch { /* ignore frame-decoding hiccups, keep scanning */ }
+          }
           animFrame = requestAnimationFrame(scan);
         };
 
-        // Wait for video to be ready before scanning
-        setTimeout(() => { if (!cancelled) scan(); }, 500);
+        // Start scanning once the video stream is live.
+        setTimeout(() => { if (!cancelled) scan(); }, 350);
       } catch (err: any) {
         if (!cancelled) {
           setError(err.name === 'NotAllowedError'

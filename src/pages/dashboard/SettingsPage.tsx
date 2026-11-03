@@ -602,6 +602,44 @@ export default function SettingsPage() {
                 <span className="font-mono text-foreground">{merchant.connectedNodeUrl || merchant.viewOnlyNodeUrl}</span>
               </div>
 
+              {/* Autonomous Node Switching — Cake-Wallet-style health monitor */}
+              <div className="p-4 rounded-lg bg-muted/30 border border-border space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-4 h-4 text-primary" />
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Automatic Node Switching</p>
+                      <p className="text-[10px] text-muted-foreground">Mirrors Cake Wallet's health monitor — periodically checks the active node and auto-switches to the freshest responsive one if it goes stale or offline. Prevents silently-wrong balances.</p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={merchant.autoNodeSwitchEnabled !== false}
+                    onCheckedChange={v => updateMerchant({ autoNodeSwitchEnabled: v })}
+                  />
+                </div>
+                {merchant.autoNodeSwitchEnabled !== false && (
+                  <div className="space-y-2 pt-1 border-t border-border">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-foreground text-xs">Health Check Interval</Label>
+                      <span className="text-sm font-mono text-primary">
+                        {merchant.autoNodeSwitchIntervalMin === 0.5 ? '30s' :
+                         merchant.autoNodeSwitchIntervalMin === 1 ? '1 min' :
+                         merchant.autoNodeSwitchIntervalMin === 2 ? '2 min' : '5 min'}
+                      </span>
+                    </div>
+                    <Slider
+                      value={[merchant.autoNodeSwitchIntervalMin]}
+                      onValueChange={v => updateMerchant({ autoNodeSwitchIntervalMin: v[0] })}
+                      min={0.5}
+                      max={5}
+                      step={0.5}
+                      className="py-2"
+                    />
+                    <p className="text-[10px] text-muted-foreground">How often the background monitor probes the active node for health. 30s = fastest detection, 5 min = least network chatter.</p>
+                  </div>
+                )}
+              </div>
+
               <div className="p-3 rounded-lg bg-warning/10 border border-warning/20">
                 <p className="text-[11px] text-warning leading-relaxed">
                   ⚠️ <strong>Keep this tab open</strong> to detect incoming payments. For 24/7 operation, switch to Managed mode.

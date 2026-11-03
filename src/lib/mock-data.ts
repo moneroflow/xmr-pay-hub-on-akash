@@ -193,6 +193,9 @@ export interface Merchant {
   lastSweepDate: string | null; // Timestamp of last successful sweep
   activeSweepFlag: boolean; // Show sweeping banner when true
   activeSweepMessage: string; // Current sweep step message to display
+  // Autonomous node switching (Cake-Wallet-style background health monitor)
+  autoNodeSwitchEnabled: boolean; // periodic health probe + auto rotate
+  autoNodeSwitchIntervalMin: number; // minutes between health probes (default 0.5)
 }
 
 // Pro subscription constants
@@ -365,6 +368,8 @@ export const defaultMerchant: Merchant = {
   nodeStatus: 'offline',
   nodeHeight: 0,
   nodeLatencyMs: 0,
+  autoNodeSwitchEnabled: true,
+  autoNodeSwitchIntervalMin: 0.5,
   posQuickButtons: [],
   posCategories: ['Food', 'Drinks', 'Services', 'Products'],
   fqdn: '',
